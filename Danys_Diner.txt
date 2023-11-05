@@ -1,0 +1,220 @@
+CREATE SCHEMA dannys_diner;
+SET search_path = dannys_diner;
+
+CREATE TABLE sales (
+  "customer_id" VARCHAR(1),
+  "order_date" DATE,
+  "product_id" INTEGER
+);
+
+INSERT INTO sales
+  ("customer_id", "order_date", "product_id")
+VALUES
+  ('A', '2021-01-01', '1'),
+  ('A', '2021-01-01', '2'),
+  ('A', '2021-01-07', '2'),
+  ('A', '2021-01-10', '3'),
+  ('A', '2021-01-11', '3'),
+  ('A', '2021-01-11', '3'),
+  ('B', '2021-01-01', '2'),
+  ('B', '2021-01-02', '2'),
+  ('B', '2021-01-04', '1'),
+  ('B', '2021-01-11', '1'),
+  ('B', '2021-01-16', '3'),
+  ('B', '2021-02-01', '3'),
+  ('C', '2021-01-01', '3'),
+  ('C', '2021-01-01', '3'),
+  ('C', '2021-01-07', '3');
+ 
+
+CREATE TABLE menu (
+  "product_id" INTEGER,
+  "product_name" VARCHAR(5),
+  "price" INTEGER
+);
+
+INSERT INTO menu
+  ("product_id", "product_name", "price")
+VALUES
+  ('1', 'sushi', '10'),
+  ('2', 'curry', '15'),
+  ('3', 'ramen', '12');
+  
+CREATE TABLE members (
+  "customer_id" VARCHAR(1),
+  "join_date" DATE
+);
+
+INSERT INTO members
+  ("customer_id", "join_date")
+VALUES
+  ('A', '2021-01-07'),
+  ('B', '2021-01-09');
+
+/* --------------------
+   Case Study Questions
+   --------------------*/
+
+-- 1. What is the total amount each customer spent at the ----restaurant?
+SELECT s.customer_id, SUM(m.price)
+FROM dannys_diner.sales s
+JOIN dannys_diner.menu m
+ON s.product_id = m.product_id
+GROUP BY s.customer_id
+ORDER BY s.customer_id;
+
+-- 2. How many days has each customer visited the restaurant?
+SELECT s.customer_id, COUNT(*) as "Number of days visited"
+FROM dannys_diner.sales s
+GROUP BY s.customer_id
+ORDER BY s.customer_id;
+
+-- 3. What was the first item from the menu purchased by each customer?
+SELECT tmp.customer_id,tmp.product_name
+FROM
+(SELECT s.customer_id, s.product_id,m.product_name,
+       rank() OVER (PARTITION BY s.customer_id ORDER BY s.order_date,s.product_id) as "rank_menu"
+FROM dannys_diner.sales s
+JOIN dannys_diner.menu m 
+ON m.product_id=s.product_id) tmp
+WHERE rank_menu = 1
+GROUP BY tmp.customer_id, tmp.product_name;
+
+-- 4. What is the most purchased item on the menu and how many times was it purchased by all customers?
+SELECT customer_id, COUNT(*) as "Number of purchases"
+FROM dannys_diner.sales s
+WHERE product_id = (
+SELECT prod
+FROM (
+SELECT s.product_id as "prod", COUNT(*) as "num_of_times"
+FROM dannys_diner.sales s
+GROUP BY s.product_id) tmp
+WHERE num_of_times = (SELECT MAX(num_of_times)
+    FROM (
+        SELECT s.product_id, COUNT(*) AS num_of_times
+        FROM dannys_diner.sales s
+        GROUP BY s.product_id
+    ) AS max_product)
+  )
+  GROUP BY customer_id, product_id;
+
+-- 5. Which item was the most popular for each customer?
+WITH tmp AS (
+SELECT s.customer_id, s.product_id, COUNT(*) as Num_of_orders,
+  m.product_name
+FROM dannys_diner.sales s
+JOIN dannys_diner.menu m
+ON s.product_id = m.product_id
+GROUP BY s.customer_id, s.product_id,m.product_name
+) 
+
+SELECT customer_id, product_name 
+FROM 
+(
+SELECT customer_id,product_id,product_name,
+rank() OVER (PARTITION BY customer_id 
+             ORDER BY Num_of_orders) as "rank_prod" FROM tmp
+)tmp2 
+where rank_prod = 1;
+
+-- 6. Which item was purchased first by the customer after they became a member?
+SELECT customer_id, product_name
+FROM(
+SELECT s.customer_id, s.product_id,me.product_name,s.order_date,
+rank() OVER (PARTITION BY s.customer_id ORDER BY order_date) as "rank_order"
+FROM dannys_diner.sales s
+JOIN dannys_diner.members m 
+ON s.order_date >= m.join_date AND s.customer_id = m.customer_id
+JOIN dannys_diner.menu me
+ON me.product_id = s.product_id
+) tmp
+WHERE rank_order = 1
+GROUP BY customer_id, product_name;
+
+-- 7. Which item was purchased just before the customer became a member?
+SELECT customer_id, product_name
+FROM(
+SELECT s.customer_id, s.product_id,me.product_name,s.order_date,
+rank() OVER (PARTITION BY s.customer_id ORDER BY order_date DESC,s.product_id DESC) as "rank_order"
+FROM dannys_diner.sales s
+JOIN dannys_diner.members m 
+ON s.order_date < m.join_date AND s.customer_id = m.customer_id
+JOIN dannys_diner.menu me
+ON me.product_id = s.product_id
+) tmp
+WHERE rank_order = 1
+GROUP BY customer_id, product_name;
+
+-- 8. What is the total items and amount spent for each member before they became a member?
+SELECT s.customer_id, count(*) as Num_of_items,sum(me.price) as Amt
+FROM dannys_diner.sales s
+JOIN dannys_diner.members m 
+ON s.order_date < m.join_date AND s.customer_id = m.customer_id
+JOIN dannys_diner.menu me
+ON me.product_id = s.product_id
+GROUP BY s.customer_id
+ORDER BY s.customer_id;
+
+-- 9.  If each $1 spent equates to 10 points and sushi has a 2x points multiplier - how many points would each customer have?
+SELECT s.customer_id,
+			SUM(CASE
+               WHEN s.product_id = 1 THEN price*20 
+	        ELSE price*10
+	        END)
+	 		AS Points
+FROM dannys_diner.sales s
+JOIN dannys_diner.menu me
+ON me.product_id = s.product_id
+GROUP BY s.customer_id
+ORDER BY s.customer_id;
+
+
+-- 10. In the first week after a customer joins the program (including their join date) they earn 2x points on all items, not just sushi - how many points do customer A and B have at the end of January?
+SELECT s.customer_id,
+               SUM(CASE
+               WHEN (s.product_id = 1) OR (s.order_date >= m.join_date AND s.order_date < (m.join_date + INTERVAL '1 week')) THEN price*20 
+	           ELSE price*10
+	           END)
+	 		   AS Points
+FROM dannys_diner.sales s
+JOIN dannys_diner.menu me
+ON me.product_id = s.product_id
+JOIN dannys_diner.members m
+ON m.customer_id = s.customer_id
+GROUP BY s.customer_id
+ORDER BY customer_id;
+
+--Bonus Question 1 
+SELECT s.customer_id,s.order_date,me.product_name,me.price,
+CASE
+WHEN s.order_date >= m.join_date THEN 'Y'
+ELSE 'N'
+END AS member
+FROM dannys_diner.sales s
+LEFT JOIN dannys_diner.members m 
+ON s.customer_id = m.customer_id
+JOIN dannys_diner.menu me
+ON me.product_id = s.product_id
+ORDER BY s.customer_id,s.order_date;
+
+--Bonus Question 2
+WITH member_det AS (SELECT s.customer_id, order_date,product_name,price,
+CASE
+WHEN s.order_date >= m.join_date THEN 'Y'
+ELSE 'N'
+END AS member
+FROM dannys_diner.sales s
+LEFT JOIN dannys_diner.members m 
+ON s.customer_id = m.customer_id
+JOIN dannys_diner.menu me
+ON me.product_id = s.product_id)
+
+SELECT *,
+CASE
+    WHEN member = 'Y' THEN RANK() OVER (PARTITION BY customer_id ORDER BY order_date)
+       END AS rank
+FROM member_det
+
+
+
+
